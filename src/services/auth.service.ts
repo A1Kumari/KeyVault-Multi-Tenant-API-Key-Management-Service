@@ -1,9 +1,9 @@
-const { Tenant } = require('../models');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+import { Tenant } from '../models';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 
-class TenantService {
-    async register({ name, email, password }) {
+class AuthService {
+    async register({ name, email, password }: any) {
         const existingTenant = await Tenant.findOne({ where: { email } });
         if (existingTenant) {
             throw new Error('Email already registered');
@@ -19,7 +19,7 @@ class TenantService {
         return this.generateToken(tenant);
     }
 
-    async login({ email, password }) {
+    async login({ email, password }: any) {
         const tenant = await Tenant.findOne({ where: { email } });
         if (!tenant) {
             throw new Error('Invalid email or password');
@@ -33,7 +33,7 @@ class TenantService {
         return this.generateToken(tenant);
     }
 
-    async getProfile(id) {
+    async getProfile(id: string) {
         const tenant = await Tenant.findByPk(id, {
             attributes: { exclude: ['password'] }
         });
@@ -41,13 +41,16 @@ class TenantService {
         return tenant;
     }
 
-    generateToken(tenant) {
+    generateToken(tenant: any) {
         const payload = {
             id: tenant.id,
+            userId: tenant.id,
             email: tenant.email,
+            tenantId: tenant.id,
         };
-        return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1d' });
+        const secret = process.env.JWT_SECRET || 'secret';
+        return jwt.sign(payload, secret, { expiresIn: '1d' });
     }
 }
 
-module.exports = new TenantService();
+export const authService = new AuthService();
