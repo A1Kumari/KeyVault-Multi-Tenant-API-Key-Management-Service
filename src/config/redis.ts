@@ -1,40 +1,40 @@
 import Redis from 'ioredis';
 import { env } from './env';
-import logger from './logger';
 
 let redis: Redis | null = null;
 
-export function getRedis(): Redis {
+export const getRedis = (): Redis => {
     if (!redis) {
         const redisUrl = env.UPSTASH_REDIS_URL || env.REDIS_URL;
 
         if (!redisUrl) {
-            logger.warn('Redis URL not configured, using in-memory fallback');
-            // Return a mock Redis for development without Redis
+            console.warn('⚠️ Redis URL not configured, using mock');
             return createMockRedis();
         }
 
         redis = new Redis(redisUrl, {
             maxRetriesPerRequest: 3,
             retryStrategy(times) {
-                const delay = Math.min(times * 50, 2000);
-                return delay;
+                if (times > 3) return null;
+                return Math.min(times * 100, 3000);
             }
         });
 
-        redis.on('connect', () => {
-            logger.info('✅ Redis connected');
-        });
-
-        redis.on('error', (err) => {
-            logger.error('Redis error', { error: err.message });
-        });
+        redis.on('connect', () => console.log('✅ Redis connected'));
+        redis.on('error', (err) => console.error('❌ Redis error:', err.message));
     }
 
     return redis;
-}
+};
 
-// Simple in-memory cache for development without Redis
+export const closeRedis = async (): Promise<void> => {
+    if (redis) {
+        await redis.quit();
+        redis = null;
+    }
+};
+
+// Mock Redis for development without Redis
 function createMockRedis(): Redis {
     const cache = new Map<string, { value: string; expiry?: number }>();
 
@@ -49,31 +49,24 @@ function createMockRedis(): Redis {
             return item.value;
         },
         set: async (key: string, value: string, mode?: string, duration?: number) => {
-            const expiry = duration ? Date.now() + (duration * 1000) : undefined;
+            const expiry = duration ? Date.now() + duration * 1000 : undefined;
             cache.set(key, { value, expiry });
             return 'OK';
         },
-        incr: async (key: string) => {
-            const item = cache.get(key);
-            const newValue = item ? parseInt(item.value) + 1 : 1;
-            cache.set(key, { value: String(newValue), expiry: item?.expiry });
-            return newValue;
+        setex: async (key: string, seconds: number, value: string) => {
+            cache.set(key, { value, expiry: Date.now() + seconds * 1000 });
+            return 'OK';
         },
-        expire: async (key: string, seconds: number) => {
-            const item = cache.get(key);
-            if (item) {
-                item.expiry = Date.now() + (seconds * 1000);
-                return 1;
-            }
-            return 0;
+        del: async (...keys: string[]) => {
+            keys.forEach(key => cache.delete(key));
+            return keys.length;
         },
-        ttl: async (key: string) => {
-            const item = cache.get(key);
-            if (!item || !item.expiry) return -1;
-            return Math.ceil((item.expiry - Date.now()) / 1000);
+        exists: async (...keys: string[]) => {
+            return keys.filter(key => cache.has(key)).length;
         },
-        del: async (key: string) => {
-            return cache.delete(key) ? 1 : 0;
+        quit: async () => {
+            cache.clear();
+            return 'OK';
         }
     } as unknown as Redis;
 }

@@ -1,75 +1,52 @@
-const { Sequelize } = require('sequelize');
-require('dotenv').config();
+import { Sequelize } from 'sequelize';
+import { env } from './env';
 
-const sequelize = new Sequelize(
-    process.env.DB_NAME,
-    process.env.DB_USER,
-    process.env.DB_PASSWORD,
+export const sequelize = new Sequelize(
+    env.DB_NAME,
+    env.DB_USER,
+    env.DB_PASSWORD,
     {
-        host: process.env.DB_HOST,
+        host: env.DB_HOST,
+        port: parseInt(env.DB_PORT, 10),
         dialect: 'postgres',
-        port: process.env.DB_PORT,
-        logging: false, // Set to console.log to see SQL queries
+        logging: env.NODE_ENV === 'development' ? console.log : false,
+        pool: {
+            max: 10,
+            min: 0,
+            acquire: 30000,
+            idle: 10000
+        },
+        define: {
+            timestamps: true,
+            underscored: true, // Use snake_case in DB
+        }
     }
 );
 
-const testConnection = async () => {
+export const connectDatabase = async (): Promise<void> => {
     try {
         await sequelize.authenticate();
-        console.log('Database connection has been established successfully.');
+        console.log('✅ Database connected successfully');
     } catch (error) {
-        console.error('Unable to connect to the database:', error);
-    }
-};
-
-module.exports = { sequelize, testConnection };
-
-
-// src/config/database.ts
-
-import { PrismaClient } from '@prisma/client';
-import logger from './logger';
-import { env } from './env';
-
-const globalForPrisma = globalThis as unknown as {
-    prisma: PrismaClient | undefined;
-};
-
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({
-    log: env.NODE_ENV === 'development'
-        ? [
-            { emit: 'event', level: 'query' },
-            { emit: 'stdout', level: 'error' },
-            { emit: 'stdout', level: 'warn' },
-        ]
-        : [{ emit: 'stdout', level: 'error' }],
-});
-
-// Log queries in development
-if (env.NODE_ENV === 'development') {
-    prisma.$on('query' as never, (e: any) => {
-        logger.debug('Prisma Query', {
-            query: e.query,
-            duration: `${e.duration}ms`
-        });
-    });
-}
-
-if (env.NODE_ENV !== 'production') {
-    globalForPrisma.prisma = prisma;
-}
-
-export async function connectDatabase(): Promise<void> {
-    try {
-        await prisma.$connect();
-        logger.info('✅ Database connected successfully');
-    } catch (error) {
-        logger.error('❌ Database connection failed', { error });
+        console.error('❌ Database connection failed:', error);
         process.exit(1);
     }
-}
+};
 
-export async function disconnectDatabase(): Promise<void> {
-    await prisma.$disconnect();
-    logger.info('Database disconnected');
-}
+export const syncDatabase = async (): Promise<void> => {
+    try {
+        // In production, use migrations instead of sync
+        if (env.NODE_ENV === 'development') {
+            await sequelize.sync({ alter: true });
+            console.log('✅ Database synced');
+        }
+    } catch (error) {
+        console.error('❌ Database sync failed:', error);
+        throw error;
+    }
+};
+
+export const closeDatabase = async (): Promise<void> => {
+    await sequelize.close();
+    console.log('Database connection closed');
+};

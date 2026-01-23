@@ -1,43 +1,48 @@
 // src/middleware/validate.middleware.ts
-
 import { Request, Response, NextFunction } from 'express';
-import { ZodSchema, ZodError } from 'zod';
-import { sendError } from '../utils/response';
+import { z, ZodSchema, ZodError, ZodIssue } from 'zod';
+import { sendError } from '../utils/response.utils';
 
-interface ValidationSchemas {
-    body?: ZodSchema;
-    query?: ZodSchema;
-    params?: ZodSchema;
-}
-
-export function validate(schemas: ValidationSchemas) {
-    return async (req: Request, res: Response, next: NextFunction) => {
+export const validate = (schema: ZodSchema) => {
+    return (req: Request, res: Response, next: NextFunction): void => {
         try {
-            if (schemas.body) {
-                req.body = await schemas.body.parseAsync(req.body);
-            }
-
-            if (schemas.query) {
-                req.query = await schemas.query.parseAsync(req.query);
-            }
-
-            if (schemas.params) {
-                req.params = await schemas.params.parseAsync(req.params);
-            }
-
+            schema.parse({
+                body: req.body,
+                query: req.query,
+                params: req.params,
+            });
             next();
         } catch (error) {
             if (error instanceof ZodError) {
-                const errors = error.errors.reduce((acc, err) => {
-                    const path = err.path.join('.');
-                    if (!acc[path]) acc[path] = [];
-                    acc[path].push(err.message);
-                    return acc;
-                }, {} as Record<string, string[]>);
-
-                return sendError(res, 'Validation failed', 400, 'VALIDATION_ERROR', { errors });
+                // Use .issues instead of .errors
+                const errors = error.issues.map((issue: ZodIssue) => ({
+                    field: issue.path.join('.'),
+                    message: issue.message,
+                }));
+                sendError(res, 400, 'Validation failed', errors);
+                return;
             }
             next(error);
         }
     };
-}
+};
+
+// Alternative: Validate only body
+export const validateBody = (schema: ZodSchema) => {
+    return (req: Request, res: Response, next: NextFunction): void => {
+        try {
+            schema.parse(req.body);
+            next();
+        } catch (error) {
+            if (error instanceof ZodError) {
+                const errors = error.issues.map((issue: ZodIssue) => ({
+                    field: issue.path.join('.'),
+                    message: issue.message,
+                }));
+                sendError(res, 400, 'Validation failed', errors);
+                return;
+            }
+            next(error);
+        }
+    };
+};

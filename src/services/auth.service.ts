@@ -1,56 +1,166 @@
-import { Tenant } from '../models';
-import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
+// src/services/auth.service.ts
+import User from '../models/user.model';  // ← Default import (no curly braces)
+import { generateTokens, verifyRefreshToken } from '../utils/jwt.util';
+import * as tokenService from './token.service';
 
-class AuthService {
-    async register({ name, email, password }: any) {
-        const existingTenant = await Tenant.findOne({ where: { email } });
-        if (existingTenant) {
-            throw new Error('Email already registered');
-        }
-
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const tenant = await Tenant.create({
-            name,
-            email,
-            password: hashedPassword,
-        });
-
-        return this.generateToken(tenant);
-    }
-
-    async login({ email, password }: any) {
-        const tenant = await Tenant.findOne({ where: { email } });
-        if (!tenant) {
-            throw new Error('Invalid email or password');
-        }
-
-        const isValid = await bcrypt.compare(password, tenant.password);
-        if (!isValid) {
-            throw new Error('Invalid email or password');
-        }
-
-        return this.generateToken(tenant);
-    }
-
-    async getProfile(id: string) {
-        const tenant = await Tenant.findByPk(id, {
-            attributes: { exclude: ['password'] }
-        });
-        if (!tenant) throw new Error('Tenant not found');
-        return tenant;
-    }
-
-    generateToken(tenant: any) {
-        const payload = {
-            id: tenant.id,
-            userId: tenant.id,
-            email: tenant.email,
-            tenantId: tenant.id,
-        };
-        const secret = process.env.JWT_SECRET || 'secret';
-        return jwt.sign(payload, secret, { expiresIn: '1d' });
-    }
+interface RegisterInput {
+    email: string;
+    password: string;
+    name?: string;
 }
 
-export const authService = new AuthService();
+interface LoginInput {
+    email: string;
+    password: string;
+}
+
+interface AuthResult {
+    user: any;
+    accessToken: string;
+    refreshToken: string;
+}
+
+// Register a new user
+export const register = async (input: RegisterInput): Promise<AuthResult> => {
+    const { email, password, name } = input;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ where: { email } });
+    if (existingUser) {
+        throw new Error('Email already registered');
+    }
+
+    // Create user (password is hashed in model hook)
+    const user = await User.create({ email, password, name });
+
+    // Generate tokens
+    const tokens = generateTokens({
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+    });
+
+    // Store refresh token in Redis
+    await tokenService.storeRefreshToken(user.id, tokens.refreshToken);
+
+    return {
+        user: user.toJSON(),
+        ...tokens,
+    };
+};
+
+// Login user
+export const login = async (input: LoginInput): Promise<AuthResult> => {
+    const { email, password } = input;
+
+    // Find user
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+        throw new Error('Invalid email or password');
+    }
+
+    // Check if user is active
+    if (!user.isActive) {
+        throw new Error('Account is deactivated');
+    }
+
+    // Verify password
+    const isPasswordValid = await user.comparePassword(password);
+    if (!isPasswordValid) {
+        throw new Error('Invalid email or password');
+    }
+
+    // Update last login
+    await user.update({ lastLoginAt: new Date() });
+
+    // Generate tokens
+    const tokens = generateTokens({
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+    });
+
+    // Store refresh token in Redis
+    await tokenService.storeRefreshToken(user.id, tokens.refreshToken);
+
+    return {
+        user: user.toJSON(),
+        ...tokens,
+    };
+};
+
+// Refresh tokens
+export const refreshTokens = async (refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> => {
+    // Verify the refresh token
+    const payload = verifyRefreshToken(refreshToken);
+
+    if (payload.type !== 'refresh') {
+        throw new Error('Invalid token type');
+    }
+
+    // Check if refresh token matches stored one
+    const storedToken = await tokenService.getStoredRefreshToken(payload.userId);
+    if (!storedToken || storedToken !== refreshToken) {
+        throw new Error('Invalid refresh token');
+    }
+
+    // Get user
+    const user = await User.findByPk(payload.userId);
+    if (!user || !user.isActive) {
+        throw new Error('User not found or inactive');
+    }
+
+    // Generate new tokens (token rotation)
+    const tokens = generateTokens({
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+    });
+
+    // Store new refresh token
+    await tokenService.storeRefreshToken(user.id, tokens.refreshToken);
+
+    return tokens;
+};
+
+// Logout user
+export const logout = async (userId: string, accessToken: string): Promise<void> => {
+    // Blacklist the access token
+    await tokenService.blacklistToken(accessToken);
+
+    // Delete refresh token
+    await tokenService.deleteRefreshToken(userId);
+};
+
+// Get user profile
+export const getProfile = async (userId: string): Promise<any> => {
+    const user = await User.findByPk(userId);
+    if (!user) {
+        throw new Error('User not found');
+    }
+    return user.toJSON();
+};
+
+// Change password
+export const changePassword = async (
+    userId: string,
+    currentPassword: string,
+    newPassword: string
+): Promise<void> => {
+    const user = await User.findByPk(userId);
+    if (!user) {
+        throw new Error('User not found');
+    }
+
+    // Verify current password
+    const isPasswordValid = await user.comparePassword(currentPassword);
+    if (!isPasswordValid) {
+        throw new Error('Current password is incorrect');
+    }
+
+    // Update password (will be hashed by model hook)
+    await user.update({ password: newPassword });
+
+    // Invalidate all refresh tokens for this user
+    await tokenService.deleteRefreshToken(userId);
+};

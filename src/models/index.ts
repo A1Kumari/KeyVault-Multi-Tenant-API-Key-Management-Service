@@ -1,8 +1,8 @@
-const { sequelize } = require('../config/database');
-const Tenant = require('./user.model');
-const ApiKey = require('./apiKey.model');
-const UsageLog = require('./usageLog.model');
-const AuditLog = require('./auditLog.model');
+import { sequelize } from '../config/database';
+import { Tenant } from './user.model';
+import { ApiKey } from './apiKey.model';
+import { UsageLog } from './usageLog.model';
+import { AuditLog } from './auditLog.model';
 
 console.log('📦 [MODELS] Setting up model associations...');
 
@@ -20,7 +20,6 @@ ApiKey.belongsTo(Tenant, {
     foreignKey: 'tenantId',
     as: 'tenant'
 });
-console.log('   ├── ✅ Tenant -> ApiKeys');
 
 // ApiKey -> UsageLogs (one-to-many)
 ApiKey.hasMany(UsageLog, {
@@ -32,7 +31,6 @@ UsageLog.belongsTo(ApiKey, {
     foreignKey: 'keyId',
     as: 'apiKey'
 });
-console.log('   ├── ✅ ApiKey -> UsageLogs');
 
 // Tenant -> AuditLogs (one-to-many)
 Tenant.hasMany(AuditLog, {
@@ -44,7 +42,6 @@ AuditLog.belongsTo(Tenant, {
     foreignKey: 'tenantId',
     as: 'tenant'
 });
-console.log('   ├── ✅ Tenant -> AuditLogs');
 
 // Tenant (User) -> AuditLogs (as actor)
 Tenant.hasMany(AuditLog, {
@@ -56,7 +53,6 @@ AuditLog.belongsTo(Tenant, {
     foreignKey: 'userId',
     as: 'user'
 });
-console.log('   ├── ✅ User -> AuditLogs (as actor)');
 
 // Tenant (User) -> ApiKeys (as creator)
 Tenant.hasMany(ApiKey, {
@@ -68,19 +64,17 @@ ApiKey.belongsTo(Tenant, {
     foreignKey: 'createdBy',
     as: 'creator'
 });
-console.log('   └── ✅ User -> ApiKeys (as creator)');
 
 // ===========================================
 // Sync Database Function
 // ===========================================
 
-/**
- * Sync database schema with models
- * @param {Object} options - Sync options
- * @param {boolean} options.force - Drop tables and recreate (DANGEROUS!)
- * @param {boolean} options.alter - Alter existing tables to match models
- */
-const syncDatabase = async (options = {}) => {
+interface SyncOptions {
+    force?: boolean;
+    alter?: boolean;
+}
+
+export const syncDatabase = async (options: SyncOptions = {}) => {
     const { force = false, alter = true } = options;
 
     console.log('🔄 [DATABASE] Syncing database...');
@@ -97,7 +91,7 @@ const syncDatabase = async (options = {}) => {
         const tables = await sequelize.getQueryInterface().showAllTables();
         console.log(`📋 [DATABASE] Tables: ${tables.join(', ')}`);
 
-    } catch (error) {
+    } catch (error: any) {
         console.error('❌ [DATABASE] Sync failed:', error.message);
 
         if (error.name === 'SequelizeDatabaseError') {
@@ -112,37 +106,30 @@ const syncDatabase = async (options = {}) => {
 // Utility Functions
 // ===========================================
 
-/**
- * Check database connection
- * @returns {Promise<boolean>}
- */
-const checkConnection = async () => {
+export const checkConnection = async (): Promise<boolean> => {
     try {
         await sequelize.authenticate();
         console.log('✅ [DATABASE] Connection verified');
         return true;
-    } catch (error) {
+    } catch (error: any) {
         console.error('❌ [DATABASE] Connection failed:', error.message);
         return false;
     }
 };
 
-/**
- * Get database statistics
- * @returns {Promise<Object>}
- */
-const getDatabaseStats = async () => {
+export const getDatabaseStats = async (): Promise<{ tenants: number; apiKeys: number; auditLogs: number } | null> => {
     try {
-        const [tenantCount] = await sequelize.query('SELECT COUNT(*) as count FROM tenants');
-        const [keyCount] = await sequelize.query('SELECT COUNT(*) as count FROM api_keys');
-        const [auditCount] = await sequelize.query('SELECT COUNT(*) as count FROM audit_logs');
+        // Use count() method on models instead of raw query for better abstraction
+        const tenantCount = await Tenant.count();
+        const keyCount = await ApiKey.count();
+        const auditCount = await AuditLog.count();
 
         return {
-            tenants: parseInt(tenantCount[0]?.count || 0),
-            apiKeys: parseInt(keyCount[0]?.count || 0),
-            auditLogs: parseInt(auditCount[0]?.count || 0)
+            tenants: tenantCount,
+            apiKeys: keyCount,
+            auditLogs: auditCount
         };
-    } catch (error) {
+    } catch (error: any) {
         console.error('❌ [DATABASE] Failed to get stats:', error.message);
         return null;
     }
@@ -150,12 +137,8 @@ const getDatabaseStats = async () => {
 
 console.log('✅ [MODELS] All models and associations initialized\n');
 
-module.exports = {
+export {
     sequelize,
-    syncDatabase,
-    checkConnection,
-    getDatabaseStats,
-    // Models
     Tenant,
     ApiKey,
     UsageLog,

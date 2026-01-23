@@ -1,88 +1,56 @@
-// src/routes/auth.routes.ts
-
 import { Router } from 'express';
-import { authController } from '../controllers/auth.controller';
+import * as authController from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
-import { authRateLimit } from '../middleware/rateLimiter.middleware';
+import { authRateLimiter } from '../middleware/rateLimiter.middleware';
 import {
     registerSchema,
     loginSchema,
-    changePasswordSchema,
     refreshTokenSchema,
-    forgotPasswordSchema,
-    resetPasswordSchema
-} from '../validations/auth.validation';
+    changePasswordSchema,
+} from '../validation/auth.validation';
 
 const router = Router();
 
-// ═══════════════════════════════════════════════════════════════
-// PUBLIC ROUTES
-// ═══════════════════════════════════════════════════════════════
-
-// POST /api/auth/register - Register new user
+// Public routes
 router.post(
     '/register',
-    authRateLimit,
+    authRateLimiter,
     validate(registerSchema),
     authController.register
 );
 
-// POST /api/auth/login - User login
 router.post(
     '/login',
-    authRateLimit,
+    authRateLimiter,
     validate(loginSchema),
     authController.login
 );
 
-// POST /api/auth/refresh - Refresh JWT token
 router.post(
     '/refresh',
     validate(refreshTokenSchema),
-    authController.refreshToken
+    authController.refresh
 );
 
-// POST /api/auth/forgot-password - Request password reset
-router.post(
-    '/forgot-password',
-    authRateLimit,
-    validate(forgotPasswordSchema),
-    authController.forgotPassword
-);
-
-// POST /api/auth/reset-password - Reset password with token
-router.post(
-    '/reset-password',
-    authRateLimit,
-    validate(resetPasswordSchema),
-    authController.resetPassword
-);
-
-// ═══════════════════════════════════════════════════════════════
-// PROTECTED ROUTES
-// ═══════════════════════════════════════════════════════════════
-
-// GET /api/auth/me - Get current user profile
-router.get(
-    '/me',
-    authenticate,
-    authController.getMe
-);
-
-// POST /api/auth/logout - User logout
+// Protected routes
 router.post(
     '/logout',
     authenticate,
     authController.logout
 );
 
-// PUT /api/auth/password - Change password
+router.get(
+    '/me',
+    authenticate,
+    authController.getProfile
+);
+
 router.put(
-    '/password',
+    '/change-password',
     authenticate,
     validate(changePasswordSchema),
     authController.changePassword
 );
 
-export { router as authRoutes };
+export default router;

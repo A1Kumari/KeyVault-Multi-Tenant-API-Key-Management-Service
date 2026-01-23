@@ -1,97 +1,97 @@
 // src/middleware/auth.middleware.ts
-
-import { Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { AuthenticatedRequest, JwtPayload } from '../types';
-import { UnauthorizedError } from '../utils/errors';
-import { Tenant } from '../models'; // Import Sequelize model
+import { env } from '../config/env';
+import { sendError } from '../utils/response.utils';
+import { isTokenBlacklisted } from '../services/token.service';
 
-// Mock env if not available or just use process.env
-const JWT_SECRET = process.env.JWT_SECRET || 'secret';
+// Define JWT payload interface
+interface JwtPayload {
+    userId: string;
+    email: string;
+    role: string;
+    type: 'access' | 'refresh';
+}
 
-export async function authenticate(
+// Extend Express Request interface
+interface AuthenticatedRequest extends Request {
+    user?: JwtPayload;
+    token?: string;
+}
+
+// Authentication middleware
+export const authenticate = async (
     req: AuthenticatedRequest,
-    _res: Response,
+    res: Response,
     next: NextFunction
-): Promise<void> {
+): Promise<void> => {
     try {
+        // Get token from header
         const authHeader = req.headers.authorization;
 
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            throw new UnauthorizedError('No token provided');
+            sendError(res, 401, 'Access token is required');
+            return;
         }
 
         const token = authHeader.split(' ')[1];
 
-        if (!token) {
-            throw new UnauthorizedError('No token provided');
+        // Check if token is blacklisted
+        const isBlacklisted = await isTokenBlacklisted(token);
+        if (isBlacklisted) {
+            sendError(res, 401, 'Token has been revoked');
+            return;
         }
 
-        // Verify JWT
-        const decoded = jwt.verify(token, JWT_SECRET) as any; // Using any to avoid strict JwtPayload mismatch for now
+        // Verify token
+        try {
+            const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
 
-        // Check if tenant/user exists using Sequelize
-        const user = await Tenant.findByPk(decoded.userId || decoded.id, {
-            attributes: ['id', 'email'] // Tenant model seems to be User
-        });
+            if (decoded.type !== 'access') {
+                sendError(res, 401, 'Invalid token type');
+                return;
+            }
 
-        if (!user) {
-            throw new UnauthorizedError('User not found');
+            // Attach user info and token to request
+            (req as AuthenticatedRequest).user = {
+                userId: decoded.userId,
+                email: decoded.email,
+                role: decoded.role,
+                type: decoded.type,
+            };
+            (req as AuthenticatedRequest).token = token;
+
+            next();
+        } catch (jwtError: any) {
+            if (jwtError.name === 'TokenExpiredError') {
+                sendError(res, 401, 'Token has expired');
+            } else if (jwtError.name === 'JsonWebTokenError') {
+                sendError(res, 401, 'Invalid token');
+            } else {
+                sendError(res, 401, 'Authentication failed');
+            }
         }
-
-        // Attach user to request
-        req.user = {
-            userId: user.id,
-            email: user.email,
-            tenantId: user.id // Assuming tenant mapping is direct for now
-        };
-
-        // logger.debug('User authenticated', { userId: user.id });
-
-        next();
     } catch (error) {
-        if (error instanceof UnauthorizedError) {
-            next(error);
-        } else if (error instanceof jwt.JsonWebTokenError) {
-            next(new UnauthorizedError('Invalid token'));
-        } else if (error instanceof jwt.TokenExpiredError) {
-            next(new UnauthorizedError('Token expired'));
-        } else {
-            next(error);
-        }
+        next(error);
     }
-}
+};
 
-// Optional authentication - doesn't fail if no token
-export async function optionalAuth(
-    req: AuthenticatedRequest,
-    _res: Response,
-    next: NextFunction
-): Promise<void> {
-    try {
-        const authHeader = req.headers.authorization;
-
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return next();
+// Authorization middleware (check roles)
+export const authorize = (...allowedRoles: string[]) => {
+    return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+        if (!req.user) {
+            sendError(res, 401, 'Not authenticated');
+            return;
         }
 
-        const token = authHeader.split(' ')[1];
-
-        if (!token) {
-            return next();
+        if (allowedRoles.length && !allowedRoles.includes(req.user.role)) {
+            sendError(res, 403, 'Not authorized to access this resource');
+            return;
         }
-
-        const decoded = jwt.verify(token, JWT_SECRET) as any;
-
-        req.user = {
-            userId: decoded.userId || decoded.id,
-            email: decoded.email,
-            tenantId: decoded.tenantId || decoded.id
-        };
 
         next();
-    } catch {
-        // Silently continue without auth
-        next();
-    }
-}
+    };
+};
+
+// Export the type for use in other files
+export type { AuthenticatedRequest, JwtPayload };

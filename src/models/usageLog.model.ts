@@ -1,15 +1,25 @@
-const { DataTypes } = require('sequelize');
-const { sequelize } = require('../config/database');
-const { v4: uuidv4 } = require('uuid');
+import { Model, DataTypes } from 'sequelize';
+import { sequelize } from '../config/database';
+import { v4 as uuidv4 } from 'uuid';
 
-const UsageLog = sequelize.define('UsageLog', {
+export class UsageLog extends Model {
+    declare id: string;
+    declare status: number;
+    declare endpoint: string | null;
+    declare ip: string | null;
+    declare userAgent: string | null;
+    declare timestamp: Date;
+    declare keyId: string;
+}
+
+UsageLog.init({
     id: {
         type: DataTypes.UUID,
         defaultValue: () => uuidv4(),
         primaryKey: true,
     },
     status: {
-        type: DataTypes.INTEGER, // HTTP status code e.g. 200, 429
+        type: DataTypes.INTEGER,
         allowNull: false,
     },
     endpoint: {
@@ -29,7 +39,8 @@ const UsageLog = sequelize.define('UsageLog', {
         defaultValue: DataTypes.NOW,
     }
 }, {
-    timestamps: false, // We'll handle our own timestamp
+    sequelize,
+    timestamps: false,
     tableName: 'usage_logs',
     indexes: [
         {
@@ -37,5 +48,3 @@ const UsageLog = sequelize.define('UsageLog', {
         }
     ]
 });
-
-module.exports = UsageLog;

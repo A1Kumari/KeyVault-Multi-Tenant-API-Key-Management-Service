@@ -1,82 +1,47 @@
-// src/app.ts
-
-import express, { Express } from 'express';
+import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import compression from 'compression';
+import routes from './routes';
+import { sendError } from './utils/response.utils';
+import { rateLimiter } from './middleware/rateLimiter.middleware';
 
-import { env, connectDatabase, logger } from './config';
-import { apiRoutes } from './routes';
-import { requestLogger } from './middleware/requestLogger.middleware';
-import { errorHandler, notFoundHandler } from './middleware/errorHandler.middleware';
-
-async function createApp(): Promise<Express> {
+export const createApp = (): Application => {
     const app = express();
 
-    // ═══════════════════════════════════════════════════════════════
-    // SECURITY MIDDLEWARE
-    // ═══════════════════════════════════════════════════════════════
+    // Security middleware
     app.use(helmet());
     app.use(cors({
-        origin: env.NODE_ENV === 'production'
-            ? process.env.ALLOWED_ORIGINS?.split(',')
-            : '*',
-        credentials: true
+        origin: process.env.CORS_ORIGIN || '*',
+        credentials: true,
     }));
 
-    // ═══════════════════════════════════════════════════════════════
-    // BODY PARSING
-    // ═══════════════════════════════════════════════════════════════
+    // Body parsing
     app.use(express.json({ limit: '10mb' }));
     app.use(express.urlencoded({ extended: true }));
-    app.use(compression());
 
-    // ═══════════════════════════════════════════════════════════════
-    // REQUEST LOGGING
-    // ═══════════════════════════════════════════════════════════════
-    app.use(requestLogger);
+    // Rate limiting
+    app.use(rateLimiter());
 
-    // ═══════════════════════════════════════════════════════════════
-    // ROUTES
-    // ═══════════════════════════════════════════════════════════════
-    app.use('/api', apiRoutes);
+    // Health check
+    app.get('/health', (req: Request, res: Response) => {
+        res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+    });
 
-    // ═══════════════════════════════════════════════════════════════
-    // ERROR HANDLING
-    // ═══════════════════════════════════════════════════════════════
-    app.use(notFoundHandler);
-    app.use(errorHandler);
+    // API routes
+    app.use('/api/v1', routes);
+
+    // 404 handler
+    app.use((req: Request, res: Response) => {
+        sendError(res, 404, 'Route not found');
+    });
+
+    // Global error handler
+    app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+        console.error('Error:', err);
+        sendError(res, 500, process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message);
+    });
 
     return app;
-}
+};
 
-async function startServer(): Promise<void> {
-    try {
-        // Connect to database
-        await connectDatabase();
-
-        // Create Express app
-        const app = await createApp();
-
-        // Start server
-        app.listen(env.PORT, () => {
-            logger.info(`🚀 Server running on port ${env.PORT}`);
-            logger.info(`📍 Environment: ${env.NODE_ENV}`);
-            logger.info(`🔗 API: http://localhost:${env.PORT}/api`);
-        });
-
-        // Graceful shutdown
-        process.on('SIGTERM', () => {
-            logger.info('SIGTERM received, shutting down gracefully');
-            process.exit(0);
-        });
-
-    } catch (error) {
-        logger.error('Failed to start server', { error });
-        process.exit(1);
-    }
-}
-
-startServer();
-
-export { createApp };
+export default createApp;

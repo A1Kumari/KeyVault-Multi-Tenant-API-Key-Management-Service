@@ -1,48 +1,44 @@
-// src/config/env.ts
-
-import { z } from 'zod';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const envSchema = z.object({
-    NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-    PORT: z.string().default('3000').transform(Number),
+export const env = {
+    // Server
+    NODE_ENV: process.env.NODE_ENV || 'development',
+    PORT: parseInt(process.env.PORT || '3000', 10),
 
     // Database
-    DATABASE_URL: z.string().url(),
+    DB_HOST: process.env.DB_HOST || 'localhost',
+    DB_PORT: process.env.DB_PORT || '5432',
+    DB_NAME: process.env.DB_NAME || 'keyvault_db',
+    DB_USER: process.env.DB_USER || 'postgres',
+    DB_PASSWORD: process.env.DB_PASSWORD || 'postgres',
 
     // Redis
-    // Upstash Redis (TCP URL for ioredis) - takes priority if set
-    UPSTASH_REDIS_URL: z.string().url().optional(),
-    // Upstash Redis REST (HTTP)
-    UPSTASH_REDIS_REST_URL: z.string().url().optional(),
-    UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
-
-    // Local/Self-hosted Redis
-    REDIS_URL: z.string().url().optional(),
+    UPSTASH_REDIS_URL: process.env.UPSTASH_REDIS_URL,
+    REDIS_URL: process.env.REDIS_URL,
 
     // JWT
-    JWT_SECRET: z.string().min(32),
-    JWT_EXPIRES_IN: z.string().default('7d'),
-    JWT_REFRESH_SECRET: z.string().min(32),
-    JWT_REFRESH_EXPIRES_IN: z.string().default('30d'),
+    JWT_SECRET: process.env.JWT_SECRET || 'change-this-secret',
+    JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '15m',
+    JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || 'change-this-refresh-secret',
+    JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
 
-    // Encryption
-    MASTER_KEY: z.string().length(64), // 256-bit hex key
+    // Bcrypt
+    BCRYPT_SALT_ROUNDS: parseInt(process.env.BCRYPT_SALT_ROUNDS || '12', 10),
 
     // Rate Limiting
-    RATE_LIMIT_WINDOW_MS: z.string().default('60000').transform(Number),
-    RATE_LIMIT_MAX: z.string().default('100').transform(Number),
-});
+    RATE_LIMIT_WINDOW_MS: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
+    RATE_LIMIT_MAX: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
+};
 
-const parsed = envSchema.safeParse(process.env);
+// Validate critical env vars in production
+if (env.NODE_ENV === 'production') {
+    const required = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'DB_PASSWORD'];
+    const missing = required.filter(key => !process.env[key] || process.env[key]?.includes('change'));
 
-if (!parsed.success) {
-    console.error('❌ Invalid environment variables:');
-    console.error(parsed.error.flatten().fieldErrors);
-    process.exit(1);
+    if (missing.length > 0) {
+        console.error(`❌ Missing or insecure environment variables: ${missing.join(', ')}`);
+        process.exit(1);
+    }
 }
-
-export const env = parsed.data;
-export type Env = z.infer<typeof envSchema>;

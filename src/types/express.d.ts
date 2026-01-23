@@ -1,15 +1,22 @@
 // src/types/express.d.ts
 
-import { JwtPayload } from './index';
+// Don't import anything - define the interface here
+interface JwtPayload {
+    userId: string;
+    email: string;
+    role: string;
+    type: 'access' | 'refresh';
+}
 
 declare global {
     namespace Express {
         interface Request {
             user?: JwtPayload;
+            token?: string;
             requestId?: string;
-            startTime?: number;
         }
     }
 }
 
+// This is required to make it a module
 export { };
